@@ -1,0 +1,42 @@
+# ============ 数据集（大文件） ============
+datasets/
+*.zip
+*.tar.gz
+*.h5
+*.npz
+*.npy
+
+# ============ Python 缓存 ============
+__pycache__/
+*.py[cod]
+*.class
+*.so
+.Python
+*.egg-info/
+
+# ============ 实验输出/工作目录 ============
+work_dirs/
+results/
+outputs/
+*.log
+*.json
+results.xlsx
+
+# ============ SAM 生成的 mask ============
+sam_mask/
+
+# ============ 图片/视频 ============
+video/
+*.mp4
+*.avi
+
+# ============ IDE/编辑器 ============
+.idea/
+.vscode/
+*.swp
+*~
+
+# ============ 系统文件 ============
+.DS_Store
+Thumbs.db
+._*
