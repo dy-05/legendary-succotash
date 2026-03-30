@@ -500,7 +500,7 @@ class VisionTransformer(nn.Module):
 
         return pooled, tokens
 
-    def forward(self, x: torch.Tensor, ex_feats: Optional[torch.Tensor] = None, sam_masks: Optional[torch.Tensor] = None, lambda_inst: float = 0.8, beta=1.2, gamma=3.0):
+    def forward(self, x: torch.Tensor, ex_feats: Optional[torch.Tensor] = None, beta=1.2, gamma=3.0):
         B, nc, w, h = x.shape
         x = self.conv1(x)  # shape = [*, width, grid, grid]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
@@ -525,7 +525,7 @@ class VisionTransformer(nn.Module):
             x = blk(x)
         for blk in self.transformer.resblocks[-1:]:
             if ex_feats is not None:
-                x =  self.custom_attn(blk.attn, blk.ln_1(x), ex_feats=ex_feats, sam_masks=sam_masks, lambda_inst=lambda_inst, beta=beta, gamma=gamma, token_size=token_size)
+                x = self.custom_attn(blk.attn, blk.ln_1(x), ex_feats=ex_feats, beta=beta, gamma=gamma, token_size=token_size)
             else:
                 x = blk(x)
                 x = x[1:]
@@ -557,7 +557,7 @@ class VisionTransformer(nn.Module):
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
         return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1)
 
-    def custom_attn(self, attn_layer, x, ex_feats=None, sam_masks: Optional[torch.Tensor] = None, lambda_inst: float = 0.8, beta=1.2, gamma=3.0, token_size=(16, 16)):
+    def custom_attn(self, attn_layer, x, ex_feats=None, beta=1.2, gamma=3.0, token_size=(16, 16)):
 
         num_heads = attn_layer.num_heads
         _, bsz, embed_dim = x.size()
@@ -573,33 +573,7 @@ class VisionTransformer(nn.Module):
         similarity_vfm = (similarity_vfm - torch.mean(similarity_vfm) * beta) * gamma
         similarity_vfm[similarity_vfm < 0.0] = float('-inf')
 
-        # instance-aware similarity fusion
-        if sam_masks is not None and lambda_inst > 0:
-            grid_h, grid_w = ex_feats.shape[2], ex_feats.shape[3]
-            sam_masks_ds = F.interpolate(
-                sam_masks.float(), 
-                size=(grid_h, grid_w), 
-                mode='nearest'
-            )  # [B, N, grid_h, grid_w]
-            
-            #
-            B, N_inst, _, _ = sam_masks_ds.shape
-            L = grid_h * grid_w
-            instance_sim = torch.zeros((B, L, L), device=x.device)
-            
-            for b in range(B):
-                for i in range(N_inst):
-                    mask_flat = sam_masks_ds[b, i].flatten()  # [L]
-                    if mask_flat.sum() < 2:  # Skip tiny masks
-                        continue
-                    indices = torch.where(mask_flat > 0.5)[0]
-                    # Enhance similarity within same instance
-                    instance_sim[b, indices[:, None], indices] += 1.0
-            
-            similarity = similarity_vfm + lambda_inst * instance_sim
-        else:
-            similarity = similarity_vfm
-
+        similarity = similarity_vfm
 
         mask = similarity.to(q.dtype).unsqueeze(1).repeat(1, num_heads, 1, 1)
         mask = mask.reshape(bsz * num_heads, mask.shape[2], mask.shape[3])

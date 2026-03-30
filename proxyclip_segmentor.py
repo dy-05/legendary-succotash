@@ -28,7 +28,7 @@ from myutils import UnNormalize
 @MODELS.register_module()
 class ProxyCLIPSegmentation(BaseSegmentor):
     def __init__(self, clip_type, model_type, vfm_model, name_path, checkpoint=None, device=torch.device('cuda'),
-                 prob_thd=0.0, logit_scale=40, beta=1.2, gamma=3.0, slide_stride=112, slide_crop=336, lambda_inst=0.8):
+                 prob_thd=0.0, logit_scale=40, beta=1.2, gamma=3.0, slide_stride=112, slide_crop=336):
 
         data_preprocessor = SegDataPreProcessor(
             mean=[122.771, 116.746, 104.094],
@@ -102,10 +102,9 @@ class ProxyCLIPSegmentation(BaseSegmentor):
         self.slide_crop = slide_crop
         self.beta = beta
         self.gamma = gamma
-        self.lambda_inst = lambda_inst
 
     @torch.no_grad()
-    def forward_feature(self, img, logit_size=None, sam_masks=None):
+    def forward_feature(self, img, logit_size=None):
         if type(img) == list:
             img = img[0]
 
@@ -170,12 +169,12 @@ class ProxyCLIPSegmentation(BaseSegmentor):
             I, J = clip_token_size
             ex_feats = None
 
-        image_features = self.clip.encode_image(img.half(),
-                                               external_feats=ex_feats,
-                                               sam_masks=sam_masks,
-                                               beta=self.beta,
-                                               lambda_inst=self.lambda_inst,
-                                               gamma=self.gamma)
+        image_features = self.clip.encode_image(
+            img.half(),
+            external_feats=ex_feats,
+            beta=self.beta,
+            gamma=self.gamma,
+        )
 
         image_features /= image_features.norm(dim=-1, keepdim=True)
         logits = image_features @ self.query_features.T
@@ -188,15 +187,13 @@ class ProxyCLIPSegmentation(BaseSegmentor):
 
         return logits
 
-    def forward_slide(self, img, img_metas, stride=112, crop_size=224, sam_masks=None):
+    def forward_slide(self, img, img_metas, stride=112, crop_size=224):
         """Inference by sliding-window with overlap.
         If h_crop > h_img or w_crop > w_img, the small patch will be used to
         decode without padding.
         """
         if type(img) == list:
             img = img[0].unsqueeze(0)
-            if sam_masks is not None and type(sam_masks) == list:
-                 sam_masks = sam_masks[0].unsqueeze(0) # Assuming sam_masks follows similar pattern
         if type(stride) == int:
             stride = (stride, stride)
         if type(crop_size) == int:
@@ -226,15 +223,8 @@ class ProxyCLIPSegmentation(BaseSegmentor):
 
                 if any(pad):
                     crop_img = nn.functional.pad(crop_img, pad)  # zero padding
-                
-                crop_mask = None
-                if sam_masks is not None:
-                   # sam_masks: [B, N, H, W]
-                   crop_mask = sam_masks[:, :, y1:y2, x1:x2]
-                   if any(pad):
-                       crop_mask = nn.functional.pad(crop_mask, pad)
 
-                crop_seg_logit = self.forward_feature(crop_img, sam_masks=crop_mask).detach()
+                crop_seg_logit = self.forward_feature(crop_img).detach()
 
                 torch.cuda.empty_cache()
 
@@ -270,31 +260,10 @@ class ProxyCLIPSegmentation(BaseSegmentor):
                                       padding_size=[0, 0, 0, 0])
                               ] * inputs.shape[0]
         
-        sam_masks = None
-        if data_samples is not None:
-             masks_list = []
-             for x in data_samples:
-                 if 'sam_masks' in x.metainfo:
-                     m = x.metainfo['sam_masks']
-                     if isinstance(m, torch.Tensor):
-                         masks_list.append(m.to(inputs.device))
-                     # If it's numpy, convert? PackSegInputs usually leaves it as passed if not a special key. 
-                     # MMcv LoadAnnotations might pass numpy. My loader returns Tensor. 
-                     # But PackSegInputs might not preserve Tensor if passing through meta? 
-                     # Usually meta keys are preserved.
-             
-             if len(masks_list) == len(data_samples):
-                 # Try stack
-                 try:
-                     sam_masks = torch.cat(masks_list, dim=0)
-                 except Exception as e:
-                     print(f"Cannot stack sam_masks: {e}")
-                     sam_masks = None
-
         if self.slide_crop > 0:
-            seg_logits = self.forward_slide(inputs, batch_img_metas, self.slide_stride, self.slide_crop, sam_masks=sam_masks)
+            seg_logits = self.forward_slide(inputs, batch_img_metas, self.slide_stride, self.slide_crop)
         else:
-            seg_logits = self.forward_feature(inputs, batch_img_metas[0]['ori_shape'], sam_masks=sam_masks)
+            seg_logits = self.forward_feature(inputs, batch_img_metas[0]['ori_shape'])
 
         return self.postprocess_result(seg_logits, data_samples)
 

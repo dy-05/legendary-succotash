@@ -27,7 +27,6 @@ def parse_args():
     # will pass the `--local-rank` parameter to `tools/train.py` instead
     # of `--local_rank`.
     parser.add_argument('--local_rank', '--local-rank', type=int, default=0)
-    parser.add_argument('--lambda-inst', type=float, default=None, help='lambda for instance similarity')
     args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -62,9 +61,6 @@ def main():
     cfg = Config.fromfile(args.config)
     cfg.launcher = args.launcher
     cfg.work_dir = args.work_dir
-
-    if args.lambda_inst is not None:
-        cfg.model.lambda_inst = args.lambda_inst
 
     # trigger_visualization_hook(cfg, args)
     runner = Runner.from_cfg(cfg)

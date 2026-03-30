@@ -9,33 +9,6 @@ import mmcv
 from mmcv.transforms import LoadAnnotations as MMCV_LoadAnnotations, BaseTransform
 import warnings
 import numpy as np
-from sam_mask_loader import load_sam_mask_for_frame
-
-@TRANSFORMS.register_module()
-class LoadSAMMasks(BaseTransform):
-    def __init__(self, mask_dir, target_size=None, orig_img_size=(1080, 1280)):
-        self.mask_dir = mask_dir
-        self.target_size = target_size
-        self.orig_img_size = orig_img_size
-        
-    def transform(self, results):
-        img_path = results['img_path']
-        
-        # Determine target size
-        if self.target_size is not None:
-             t_size = self.target_size
-        else:
-             # Use current image shape (H, W)
-             if 'img_shape' in results:
-                 t_size = results['img_shape'][:2]
-             else:
-                 # Fallback if img_shape not found (e.g. before loading image)
-                 t_size = (336, 336)
-                 
-        masks = load_sam_mask_for_frame(img_path, self.mask_dir, t_size, self.orig_img_size)
-        if masks is not None:
-            results['sam_masks'] = masks
-        return results
 
 @DATASETS.register_module()
 class PascalVOC20Dataset(BaseSegDataset):
