@@ -146,7 +146,8 @@ class ProxyCLIPSegmentation(BaseSegmentor):
             v = v.transpose(1, 2).reshape(nb_im, nb_tokens, -1)[:, 1:, :]
 
             patch_size = self.vfm.patch_embed.patch_size
-            I, J = imgs_norm[0].shape[-2] // patch_size, imgs_norm[0].shape[-2] // patch_size
+            I = imgs_norm[0].shape[-2] // patch_size
+            J = imgs_norm[0].shape[-1] // patch_size
 
             # ex_feats = q.reshape(nb_im, I, J, -1).permute(0, 3, 1, 2)
             # ex_feats = k.reshape(nb_im, I, J, -1).permute(0, 3, 1, 2)

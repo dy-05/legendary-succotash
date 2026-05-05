@@ -500,7 +500,16 @@ class VisionTransformer(nn.Module):
 
         return pooled, tokens
 
-    def forward(self, x: torch.Tensor, ex_feats: Optional[torch.Tensor] = None, beta=1.2, gamma=3.0):
+    def forward(
+        self,
+        x: torch.Tensor,
+        ex_feats: Optional[torch.Tensor] = None,
+        beta=1.2,
+        gamma=3.0,
+        return_layer_tokens: bool = False,
+        layer_indices: Optional[Sequence[int]] = None,
+        layer_token_mode: str = 'proj',
+    ):
         B, nc, w, h = x.shape
         x = self.conv1(x)  # shape = [*, width, grid, grid]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
@@ -520,21 +529,57 @@ class VisionTransformer(nn.Module):
 
         token_size = h // self.patch_size[0], w // self.patch_size[1]
 
+        requested_layers = set(layer_indices) if layer_indices is not None else None
+        if layer_token_mode not in ('proj', 'raw', 'all'):
+            raise ValueError(f'Invalid layer_token_mode={layer_token_mode}, expected one of proj/raw/all')
+        layer_tokens_proj = [] if return_layer_tokens and layer_token_mode in ('proj', 'all') else None
+        layer_tokens_raw = [] if return_layer_tokens and layer_token_mode in ('raw', 'all') else None
+        layer_tokens_ln = [] if return_layer_tokens and layer_token_mode == 'all' else None
+
         x = x.permute(1, 0, 2)  # NLD -> LND
-        for blk in self.transformer.resblocks[:-1]:
-            x = blk(x)
-        for blk in self.transformer.resblocks[-1:]:
-            if ex_feats is not None:
-                x = self.custom_attn(blk.attn, blk.ln_1(x), ex_feats=ex_feats, beta=beta, gamma=gamma, token_size=token_size)
+        num_layers = len(self.transformer.resblocks)
+        for layer_id, blk in enumerate(self.transformer.resblocks):
+            is_last = layer_id == (num_layers - 1)
+            if is_last:
+                if ex_feats is not None:
+                    x = self.custom_attn(
+                        blk.attn,
+                        blk.ln_1(x),
+                        ex_feats=ex_feats,
+                        beta=beta,
+                        gamma=gamma,
+                        token_size=token_size,
+                    )
+                else:
+                    x = blk(x)
+                    x = x[1:]
+                patch_tokens_lnd = x
             else:
                 x = blk(x)
-                x = x[1:]
+                patch_tokens_lnd = x[1:]
 
-        x = x.permute(1, 0, 2)  # LND -> NLD
+            if return_layer_tokens and (requested_layers is None or layer_id in requested_layers):
+                patch_tokens_nld = patch_tokens_lnd.permute(1, 0, 2)  # LND -> NLD
+                if layer_tokens_raw is not None:
+                    layer_tokens_raw.append(patch_tokens_nld)
+                if layer_tokens_proj is not None or layer_tokens_ln is not None:
+                    patch_tokens_ln = self.ln_post(patch_tokens_nld)
+                    if layer_tokens_ln is not None:
+                        layer_tokens_ln.append(patch_tokens_ln)
+                    if layer_tokens_proj is not None:
+                        patch_tokens_proj = patch_tokens_ln @ self.proj
+                        layer_tokens_proj.append(patch_tokens_proj)
 
+        x = patch_tokens_lnd.permute(1, 0, 2)  # LND -> NLD (patch tokens only)
         x = self.ln_post(x)
         x = x @ self.proj
 
+        if return_layer_tokens:
+            if layer_token_mode == 'proj':
+                return x, layer_tokens_proj
+            if layer_token_mode == 'raw':
+                return x, layer_tokens_raw
+            return x, layer_tokens_proj, layer_tokens_raw, layer_tokens_ln
         return x
 
     def interpolate_pos_encoding(self, x, w, h):

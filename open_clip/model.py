@@ -6,7 +6,7 @@ import copy
 import logging
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
@@ -262,11 +262,56 @@ class CLIP(nn.Module):
         self.visual.set_grad_checkpointing(enable)
         self.transformer.grad_checkpointing = enable
 
-    def encode_image(self, image, external_feats=None, beta=1.2, gamma=3.0, normalize: bool = False):
+    def encode_image(
+        self,
+        image,
+        external_feats=None,
+        beta=1.2,
+        gamma=3.0,
+        normalize: bool = False,
+        return_layer_tokens: bool = False,
+        layer_indices: Optional[Sequence[int]] = None,
+        layer_token_mode: str = 'proj',
+    ):
         if external_feats is None:
-            features = self.visual(image)
+            features = self.visual(
+                image,
+                return_layer_tokens=return_layer_tokens,
+                layer_indices=layer_indices,
+                layer_token_mode=layer_token_mode,
+            )
         else:
-            features = self.visual(image, external_feats, beta=beta, gamma=gamma)
+            features = self.visual(
+                image,
+                external_feats,
+                beta=beta,
+                gamma=gamma,
+                return_layer_tokens=return_layer_tokens,
+                layer_indices=layer_indices,
+                layer_token_mode=layer_token_mode,
+            )
+
+        if return_layer_tokens:
+            if not isinstance(features, tuple):
+                raise RuntimeError('Expected tuple features when return_layer_tokens=True')
+
+            if len(features) == 2:
+                final_features, layer_tokens = features
+                final_features = F.normalize(final_features, dim=-1) if normalize else final_features
+                return final_features, layer_tokens
+
+            if len(features) == 3:
+                final_features, layer_tokens_proj, layer_tokens_raw = features
+                final_features = F.normalize(final_features, dim=-1) if normalize else final_features
+                return final_features, layer_tokens_proj, layer_tokens_raw
+
+            if len(features) == 4:
+                final_features, layer_tokens_proj, layer_tokens_raw, layer_tokens_ln = features
+                final_features = F.normalize(final_features, dim=-1) if normalize else final_features
+                return final_features, layer_tokens_proj, layer_tokens_raw, layer_tokens_ln
+
+            raise RuntimeError(f'Unexpected number of outputs from visual tower: {len(features)}')
+
         return F.normalize(features, dim=-1) if normalize else features
 
     def encode_text(self, text, normalize: bool = False):

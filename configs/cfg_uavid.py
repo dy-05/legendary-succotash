@@ -6,7 +6,7 @@ _base_ = './base_config.py'
 model = dict(    
     name_path='./configs/cls_uavid.txt',
     prob_thd=0.3,
-    slide_stride=112,
+    slide_stride=224,
     slide_crop=224
 )
 
@@ -16,7 +16,7 @@ data_root = './datasets/UAVid/'
 
 test_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='Resize', scale=(2048, 448), keep_ratio=True),
+    dict(type='Resize', scale=(448, 448), keep_ratio=True),
     # add loading annotation after ``Resize`` because ground truth
     # does not need to do resize data transform
     dict(type='LoadAnnotations'),
@@ -32,5 +32,5 @@ test_dataloader = dict(
         type=dataset_type,
         data_root=data_root,
         data_prefix=dict(
-            img_path='img_dir/0_1080_0_1280/seq21', seg_map_path='ann_dir/0_1080_0_1280/seq21'),
+            img_path='img_dir/0_1080_1280_2560', seg_map_path='ann_dir/0_1080_1280_2560'),
         pipeline=test_pipeline))
